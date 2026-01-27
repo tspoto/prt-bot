@@ -16,8 +16,11 @@ class PRTAlertBot:
         if not self.bluesky_handle or not self.bluesky_password:
             raise ValueError("Missing BLUESKY_HANDLE or BLUESKY_PASSWORD environment variables")
         
-        # Port Authority GTFS-RT Alert Feed
-        self.alert_feed_url = 'https://truetime.portauthority.org/gtfsrt-bus/alerts'
+        # Port Authority GTFS-RT Alert Feeds (bus and train)
+        self.alert_feed_urls = [
+            'https://truetime.portauthority.org/gtfsrt-bus/alerts',
+            'https://truetime.portauthority.org/gtfsrt-train/alerts'
+        ]
         
         self.posted_ids_file = 'posted_alerts.json'
         self.posted_ids = self.load_posted_ids()
@@ -45,26 +48,34 @@ class PRTAlertBot:
             json.dump(list(self.posted_ids), f, indent=2)
     
     def fetch_alerts(self):
-        """Fetch alerts from Port Authority GTFS-RT feed"""
-        try:
-            response = requests.get(self.alert_feed_url, timeout=10)
-            response.raise_for_status()
-            
-            # Parse GTFS-Realtime protobuf
-            feed = gtfs_realtime_pb2.FeedMessage()
-            feed.ParseFromString(response.content)
-            
-            alerts = []
-            for entity in feed.entity:
-                if entity.HasField('alert'):
-                    alerts.append(entity)
-            
-            print(f"✓ Fetched {len(alerts)} alerts from Port Authority")
-            return alerts
-            
-        except Exception as e:
-            print(f"✗ Error fetching alerts: {e}")
-            return []
+        """Fetch alerts from Port Authority GTFS-RT feeds (bus and train)"""
+        all_alerts = []
+        
+        for feed_url in self.alert_feed_urls:
+            feed_type = 'bus' if 'bus' in feed_url else 'train'
+            try:
+                response = requests.get(feed_url, timeout=10)
+                response.raise_for_status()
+                
+                # Parse GTFS-Realtime protobuf
+                feed = gtfs_realtime_pb2.FeedMessage()
+                feed.ParseFromString(response.content)
+                
+                feed_alerts = []
+                for entity in feed.entity:
+                    if entity.HasField('alert'):
+                        # Prefix the ID with feed type to avoid conflicts
+                        entity.id = f"{feed_type}_{entity.id}"
+                        feed_alerts.append(entity)
+                
+                print(f"✓ Fetched {len(feed_alerts)} alerts from {feed_type} feed")
+                all_alerts.extend(feed_alerts)
+                
+            except Exception as e:
+                print(f"✗ Error fetching {feed_type} alerts: {e}")
+        
+        print(f"✓ Total: {len(all_alerts)} alerts from all feeds")
+        return all_alerts
     
     def format_alert(self, entity):
         """Format alert for Bluesky post"""
