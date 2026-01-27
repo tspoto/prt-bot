@@ -6,6 +6,7 @@ import json
 import os
 from datetime import datetime
 import pytz
+import hashlib
 
 class PRTAlertBot:
     def __init__(self):
@@ -47,6 +48,23 @@ class PRTAlertBot:
         with open(self.posted_ids_file, 'w') as f:
             json.dump(list(self.posted_ids), f, indent=2)
     
+    def get_alert_hash(self, entity):
+        """Generate unique hash from alert content (not just ID)"""
+        alert = entity.alert
+        
+        # Get header and description
+        header = ""
+        if alert.header_text.translation:
+            header = alert.header_text.translation[0].text
+        
+        description = ""
+        if alert.description_text.translation:
+            description = alert.description_text.translation[0].text
+        
+        # Create hash from content
+        content = f"{header}|{description}"
+        return hashlib.md5(content.encode()).hexdigest()[:16]
+    
     def fetch_alerts(self):
         """Fetch alerts from Port Authority GTFS-RT feeds (bus and train)"""
         all_alerts = []
@@ -64,8 +82,6 @@ class PRTAlertBot:
                 feed_alerts = []
                 for entity in feed.entity:
                     if entity.HasField('alert'):
-                        # Prefix the ID with feed type to avoid conflicts
-                        entity.id = f"{feed_type}_{entity.id}"
                         feed_alerts.append(entity)
                 
                 print(f"✓ Fetched {len(feed_alerts)} alerts from {feed_type} feed")
@@ -149,25 +165,25 @@ class PRTAlertBot:
             print("No alerts to process")
             return 0
         
-        # Process alerts
+        # Process alerts (use content hash instead of API ID)
         alerts_to_post = []
         for entity in alerts:
-            alert_id = entity.id
-            if alert_id and alert_id not in self.posted_ids:
-                alerts_to_post.append((alert_id, entity))
+            alert_hash = self.get_alert_hash(entity)
+            if alert_hash and alert_hash not in self.posted_ids:
+                alerts_to_post.append((alert_hash, entity))
         
         print(f"\nFound {len(alerts_to_post)} new alerts to post")
         
         # Post to Bluesky
         posted_count = 0
-        for alert_id, entity in alerts_to_post:
+        for alert_hash, entity in alerts_to_post:
             try:
                 post_text = self.format_alert(entity)
                 
                 print(f"\nPosting: {post_text[:80]}...")
                 self.client.send_post(text=post_text)
                 
-                self.posted_ids.add(alert_id)
+                self.posted_ids.add(alert_hash)
                 self.save_posted_ids()
                 posted_count += 1
                 
