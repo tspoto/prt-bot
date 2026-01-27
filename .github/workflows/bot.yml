@@ -3,7 +3,7 @@ name: PRT Alert Bot
 on:
   schedule:
     # Every 20 minutes, all day
-    - cron: '*/20 * * * *'
+    - cron: '*/5 * * * *'
   
   # Allow manual trigger for testing
   workflow_dispatch:

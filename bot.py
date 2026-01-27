@@ -91,27 +91,27 @@ class PRTAlertBot:
         if alert.description_text.translation:
             description = alert.description_text.translation[0].text
         
-        # Get affected routes
-        routes = []
-        for informed_entity in alert.informed_entity:
-            if informed_entity.HasField('route_id'):
-                routes.append(informed_entity.route_id)
+        # Start with just the header
+        text = header
         
-        # Build the post text
-        if routes:
-            route_text = ", ".join(set(routes))
-            text = f"Route {route_text}: {header}"
-        else:
-            text = header
-        
-        # Add description if available and there's room
+        # Add description if available, different from header, and there's room
         if description and description != header:
-            # Clean up description (remove excessive newlines)
-            description = description.replace('\\n', ' ').strip()
-            if len(text) + len(" - ") + len(description) <= 300:
-                text = f"{text} - {description}"
+            # Clean up description (remove excessive newlines, keep it readable)
+            description_clean = description.replace('\\n\\n', ' - ').replace('\\n', ' ').strip()
+            
+            # Check if we have room to add description
+            separator = ": "
+            combined_length = len(text) + len(separator) + len(description_clean)
+            
+            if combined_length <= 300:
+                text = f"{text}{separator}{description_clean}"
+            elif len(text) < 250:
+                # If header is short enough, add truncated description
+                available_space = 297 - len(text) - len(separator)
+                if available_space > 20:  # Only add if we can fit meaningful text
+                    text = f"{text}{separator}{description_clean[:available_space]}..."
         
-        # Bluesky has 300 character limit
+        # Final safety check - Bluesky has 300 character limit
         if len(text) > 300:
             text = text[:297] + "..."
         
