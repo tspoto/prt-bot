@@ -116,7 +116,7 @@ class PRTAlertBot:
             text = header
         
         # Clean up newlines
-        text = text.replace('\n\n', ' - ').replace('\n', ' ').strip()
+        text = text.replace('\\n\\n', ' - ').replace('\\n', ' ').strip()
         
         # Detect Out of Service BEFORE replacing
         is_out_of_service = bool(re.search(r'\b(OS|O/S|OSS)\b', text, re.IGNORECASE))
