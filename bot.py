@@ -115,30 +115,18 @@ class PRTAlertBot:
         else:
             text = header
         
-        # Clean up newlines
-        text = text.replace('\\n\\n', ' - ').replace('\\n', ' ').strip()
+        # Keep original newline formatting
         
         # Detect Out of Service BEFORE replacing
         is_out_of_service = bool(re.search(r'\b(OS|O/S|OSS)\b', text, re.IGNORECASE))
         
-        # Find route numbers BEFORE any replacements
-        route_pattern = r'\b([A-Z]?\d+[A-Z]?)\b'
-        found_routes = re.findall(route_pattern, text)
-        unique_routes = [r for r in set(found_routes) if r in self.known_routes]
-        
         # Replace OS/O/S/OSS with "Out of Service"
         text = re.sub(r'\b(OSS|O/S|OS)\b', 'Out of Service', text, flags=re.IGNORECASE)
         
-        # Format times: 957 → 9:57
-        def add_time_colon(match):
-            t = match.group(0)
-            if len(t) == 3:
-                return f"{t[0]}:{t[1:]}"
-            elif len(t) == 4:
-                return f"{t[:2]}:{t[2:]}"
-            return t
-        
-        text = re.sub(r'\b([0-2]?\d{3})\b(?=\s*[-–]|\s*[ap]|\s*[IO]B)', add_time_colon, text)
+        # Find route numbers (exclude numbers that are part of times with : after them)
+        route_pattern = r'\b([A-Z]?\d+[A-Z]?)\b(?!:)'
+        found_routes = re.findall(route_pattern, text)
+        unique_routes = [r for r in set(found_routes) if r in self.known_routes]
         
         # Try full replacements
         full_text = text.replace(' IB ', ' Inbound ').replace(' OB ', ' Outbound ')
