@@ -117,18 +117,19 @@ class PRTAlertBot:
         
         # Combine header and description
         if description and description != header:
-            # Remove redundant header prefix if it appears in description
-            if ':' in header:
-                prefix = header.split(':')[0].strip()
-                # Check if the prefix is redundant (appears again after colon)
-                rest_of_header = header.split(':', 1)[1].strip() if ':' in header else header
-                if prefix.lower() in rest_of_header.lower() and len(prefix) > 3:
-                    # Redundant prefix like "1/27 12 OS: 12 OS ..."
-                    header = rest_of_header
+            # Use description primarily, only use header if it adds meaningful info
+            # Check if header content is already in description
+            header_lower = header.lower()
+            desc_lower = description.lower()
             
-            text = f"{header}: {description}"
+            # If description contains most of the header info, just use description
+            if header_lower in desc_lower or desc_lower.startswith(header_lower[:10]):
+                text = description
+            else:
+                # Header has unique info, combine them
+                text = f"{header}: {description}"
         else:
-            text = header
+            text = header if header else description
         
         # Clean up excessive newlines
         text = text.replace('\\n\\n', ' - ').replace('\\n', ' ').strip()
@@ -140,6 +141,13 @@ class PRTAlertBot:
         text = re.sub(r'\bOSS\b', 'Out of Service', text, flags=re.IGNORECASE)
         text = re.sub(r'\bO/S\b', 'Out of Service', text, flags=re.IGNORECASE)
         text = re.sub(r'\bOS\b', 'Out of Service', text, flags=re.IGNORECASE)
+        
+        # Count routes in message (do this early, before replacements)
+        route_pattern = r'\b([A-Z]?\d+[A-Z]?)\b'
+        routes = re.findall(route_pattern, text)
+        # Filter to only known PRT routes
+        routes = [r for r in routes if r in self.known_routes]
+        unique_routes = list(set(routes))
         
         # Format times - add colons to time numbers like 237 → 2:37
         def format_time(match):
@@ -162,13 +170,6 @@ class PRTAlertBot:
         text_with_full = re.sub(r'\bRED\b', '🟥 Red', text_with_full, flags=re.IGNORECASE)
         text_with_full = re.sub(r'\bBLUE\b', '🟦 Blue', text_with_full, flags=re.IGNORECASE)
         text_with_full = re.sub(r'\b(SILVER|SLVR)\b', '⬜ Silver', text_with_full, flags=re.IGNORECASE)
-        
-        # Count routes in message
-        route_pattern = r'\b([A-Z]?\d+[A-Z]?)\b'
-        routes = re.findall(route_pattern, text_with_full)
-        # Filter to only known PRT routes
-        routes = [r for r in routes if r in self.known_routes]
-        unique_routes = list(set(routes))
         
         # Determine primary feed type (use first one for emoji selection)
         primary_feed = feed_types[0] if feed_types else 'bus'
