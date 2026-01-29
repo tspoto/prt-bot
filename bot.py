@@ -97,117 +97,88 @@ class PRTAlertBot:
         return all_alerts
     
     def format_alert(self, entity, feed_types):
-        """Format alert for Bluesky post
-        
-        Args:
-            entity: GTFS alert entity
-            feed_types: list of feed types this alert appeared in (e.g., ['bus'] or ['bus', 'train'])
-        """
+        """Format alert for Bluesky post"""
         alert = entity.alert
         
-        # Get header text (alert title)
+        # Get header and description
         header = ""
         if alert.header_text.translation:
             header = alert.header_text.translation[0].text
         
-        # Get description text (details)
         description = ""
         if alert.description_text.translation:
             description = alert.description_text.translation[0].text
         
-        # Combine header and description
-        if description and description != header:
-            # Use description primarily, only use header if it adds meaningful info
-            # Check if header content is already in description
-            header_lower = header.lower()
-            desc_lower = description.lower()
-            
-            # If description contains most of the header info, just use description
-            if header_lower in desc_lower or desc_lower.startswith(header_lower[:10]):
-                text = description
-            else:
-                # Header has unique info, combine them
-                text = f"{header}: {description}"
+        # Use description if available, otherwise header
+        if description:
+            text = description
         else:
-            text = header if header else description
+            text = header
         
-        # Clean up excessive newlines
+        # Clean up newlines
         text = text.replace('\\n\\n', ' - ').replace('\\n', ' ').strip()
         
-        # Detect Out of Service
+        # Detect Out of Service BEFORE replacing
         is_out_of_service = bool(re.search(r'\b(OS|O/S|OSS)\b', text, re.IGNORECASE))
         
-        # Replace OS/O/S/OSS with "Out of Service"
-        text = re.sub(r'\bOSS\b', 'Out of Service', text, flags=re.IGNORECASE)
-        text = re.sub(r'\bO/S\b', 'Out of Service', text, flags=re.IGNORECASE)
-        text = re.sub(r'\bOS\b', 'Out of Service', text, flags=re.IGNORECASE)
-        
-        # Count routes in message (do this early, before replacements)
+        # Find route numbers BEFORE any replacements
         route_pattern = r'\b([A-Z]?\d+[A-Z]?)\b'
-        routes = re.findall(route_pattern, text)
-        # Filter to only known PRT routes
-        routes = [r for r in routes if r in self.known_routes]
-        unique_routes = list(set(routes))
+        found_routes = re.findall(route_pattern, text)
+        unique_routes = [r for r in set(found_routes) if r in self.known_routes]
         
-        # Format times - add colons to time numbers like 237 → 2:37
-        def format_time(match):
-            time_str = match.group(0)
-            if len(time_str) == 3:  # e.g., 237 → 2:37
-                return f"{time_str[0]}:{time_str[1:]}"
-            elif len(time_str) == 4:  # e.g., 1126 → 11:26
-                return f"{time_str[:2]}:{time_str[2:]}"
-            return time_str
+        # Replace OS/O/S/OSS with "Out of Service"
+        text = re.sub(r'\b(OSS|O/S|OS)\b', 'Out of Service', text, flags=re.IGNORECASE)
         
-        # Match 3-4 digit numbers that look like times
-        text = re.sub(r'\b([0-2]?\d{3})\b(?=\s*[-–]|\s*[ap]|\s*[IO]B)', format_time, text)
+        # Format times: 957 → 9:57
+        def add_time_colon(match):
+            t = match.group(0)
+            if len(t) == 3:
+                return f"{t[0]}:{t[1:]}"
+            elif len(t) == 4:
+                return f"{t[:2]}:{t[2:]}"
+            return t
         
-        # Replace IB/OB with Inbound/Outbound if we have room
-        text_with_full = text.replace(' IB ', ' Inbound ').replace(' OB ', ' Outbound ')
-        text_with_full = text_with_full.replace('IB:', 'Inbound:').replace('OB:', 'Outbound:')
-        text_with_full = text_with_full.replace('IB-', 'Inbound-').replace('OB-', 'Outbound-')
+        text = re.sub(r'\b([0-2]?\d{3})\b(?=\s*[-–]|\s*[ap]|\s*[IO]B)', add_time_colon, text)
         
-        # Add color emojis for train lines
-        text_with_full = re.sub(r'\bRED\b', '🟥 Red', text_with_full, flags=re.IGNORECASE)
-        text_with_full = re.sub(r'\bBLUE\b', '🟦 Blue', text_with_full, flags=re.IGNORECASE)
-        text_with_full = re.sub(r'\b(SILVER|SLVR)\b', '⬜ Silver', text_with_full, flags=re.IGNORECASE)
+        # Try full replacements
+        full_text = text.replace(' IB ', ' Inbound ').replace(' OB ', ' Outbound ')
+        full_text = full_text.replace('IB:', 'Inbound:').replace('OB:', 'Outbound:')
         
-        # Determine primary feed type (use first one for emoji selection)
+        # Color emojis
+        full_text = re.sub(r'\bRED\b', '🟥 Red', full_text, flags=re.IGNORECASE)
+        full_text = re.sub(r'\bBLUE\b', '🟦 Blue', full_text, flags=re.IGNORECASE)
+        full_text = re.sub(r'\b(SILVER|SLVR)\b', '⬜ Silver', full_text, flags=re.IGNORECASE)
+        
+        # Add route emojis (1-2 routes only)
         primary_feed = feed_types[0] if feed_types else 'bus'
-        
-        # Add route emojis (only if 1-2 routes)
         if len(unique_routes) <= 2 and len(unique_routes) > 0:
-            route_emoji = '🚌' if primary_feed == 'bus' else '🚊'
+            emoji = '🚌' if primary_feed == 'bus' else '🚊'
             for route in unique_routes:
-                # Add emoji after route number with space
-                text_with_full = re.sub(rf'\b{re.escape(route)}\b', f'{route} {route_emoji}', text_with_full)
+                # Replace first occurrence only
+                full_text = re.sub(rf'\b{re.escape(route)}\b', f'{route} {emoji}', full_text, count=1)
         
-        # Use full text if it fits, otherwise use abbreviated
-        if len(text_with_full) <= 280:  # Leave room for feed emoji and out of service emoji
-            text = text_with_full
+        # Use full text if it fits
+        if len(full_text) <= 280:
+            text = full_text
         
-        # Determine feed emoji prefix
+        # Add feed emoji prefix
         if len(feed_types) > 1:
-            # Alert appears in both feeds
-            feed_emoji = '🚌🚊'
+            prefix = '🚌🚊'
         elif 'train' in feed_types:
-            # Train alerts always get train emoji
-            feed_emoji = '🚊'
+            prefix = '🚊'
         elif len(unique_routes) > 0:
-            # Bus alerts with route numbers don't need bus emoji (route has it)
-            feed_emoji = ''
+            prefix = ''  # Route has emoji already
         else:
-            # Bus alerts without route numbers get bus emoji
-            feed_emoji = '🚌'
+            prefix = '🚌'
         
-        # Add out of service warning emoji
-        if is_out_of_service and feed_emoji:
-            text = f"{feed_emoji} ⚠️ {text}"
-        elif is_out_of_service:
+        # Add out of service emoji
+        if is_out_of_service:
             text = f"⚠️ {text}"
-        elif feed_emoji:
-            text = f"{feed_emoji} {text}"
         
-        # Final safety check - Bluesky has 300 character limit
+        if prefix:
+            text = f"{prefix} {text}".strip()
+        
+        # Bluesky limit
         if len(text) > 300:
             text = text[:297] + "..."
         
@@ -218,7 +189,6 @@ class PRTAlertBot:
         eastern = pytz.timezone('US/Eastern')
         now = datetime.now(eastern)
         
-        # Allow 5 AM (hour 5) through 11:59 PM (hour 23)
         if now.hour < 5:
             print(f"Outside operating hours ({now.strftime('%I:%M %p')} ET) - skipping")
             return False
@@ -227,7 +197,6 @@ class PRTAlertBot:
     
     def run(self):
         """Main bot execution"""
-        # Check operating hours
         eastern = pytz.timezone('US/Eastern')
         now = datetime.now(eastern)
         
@@ -245,9 +214,9 @@ class PRTAlertBot:
             print("No alerts to process")
             return 0
         
-        # Process alerts - track which feeds each alert appears in
-        alert_feeds = {}  # hash -> list of feed types
-        alert_entities = {}  # hash -> entity
+        # Track which feeds each alert appears in
+        alert_feeds = {}
+        alert_entities = {}
         
         for feed_type, entity in alerts:
             alert_hash = self.get_alert_hash(entity)
@@ -257,16 +226,14 @@ class PRTAlertBot:
                     alert_entities[alert_hash] = entity
                 alert_feeds[alert_hash].append(feed_type)
         
-        # Build list of alerts to post (not yet posted)
+        # Build list of new alerts
         alerts_to_post = []
         for alert_hash, feed_types in alert_feeds.items():
             if alert_hash not in self.posted_ids:
                 entity = alert_entities[alert_hash]
-                # Sort by API ID for consistent ordering
                 sort_key = int(entity.id) if entity.id.isdigit() else 0
                 alerts_to_post.append((sort_key, alert_hash, feed_types, entity))
         
-        # Sort by API ID
         alerts_to_post.sort(key=lambda x: x[0])
         
         print(f"\nFound {len(alerts_to_post)} new alerts to post")
@@ -286,7 +253,6 @@ class PRTAlertBot:
                 
                 print("✓ Posted successfully")
                 
-                # Rate limiting - be nice to Bluesky's servers
                 if posted_count < len(alerts_to_post):
                     time.sleep(3)
                 
