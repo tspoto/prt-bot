@@ -123,8 +123,9 @@ class PRTAlertBot:
         # Replace OS/O/S/OSS with "Out of Service"
         text = re.sub(r'\b(OSS|O/S|OS)\b', 'Out of Service', text, flags=re.IGNORECASE)
         
-        # Find route numbers (exclude numbers that are part of times with : after them)
-        route_pattern = r'\b([A-Z]?\d+[A-Z]?)\b(?!:)'
+        # Find route numbers (exclude numbers that are part of times, dates, or durations)
+        # Negative lookahead for: colon (times), slash (dates), space+word like "minutes"
+        route_pattern = r'\b([A-Z]?\d+[A-Z]?)\b(?!:|/|\s+(?:minute|min|hour|hr|day|week|month)s?)'
         found_routes = re.findall(route_pattern, text)
         unique_routes = [r for r in set(found_routes) if r in self.known_routes]
         
